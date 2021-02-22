@@ -59,9 +59,16 @@ function SetTargetFramework($project, $originalProject) {
     $targetFrameworkIdentifier = $originalProject.Project.PropertyGroup.TargetFrameworkIdentifier
     Write-Verbose "Found target framework version $targetFrameworkVersion"
     if ($targetFrameworkVersion -eq "v4.5.2" -and $targetFrameworkIdentifier -eq $null) {
+        Write-Verbose "Set target framework version net452"
         $project.Project.PropertyGroup.TargetFramework = "net452"
-        return
+    } elseif ($targetFrameworkVersion -eq "v4.6.2" -and $targetFrameworkIdentifier -eq $null) {
+        Write-Verbose "Set target framework version net462"
+        $project.Project.PropertyGroup.TargetFramework = "net462"
+    } elseif ($targetFrameworkVersion -eq "v4.8" -and $targetFrameworkIdentifier -eq $null) {
+        Write-Verbose "Set target framework version net48"
+        $project.Project.PropertyGroup.TargetFramework = "net48"
     } elseif ($targetFrameworkVersion -eq "v5.0" -and $targetFrameworkIdentifier -eq "Silverlight") {
+        Write-Verbose "Set target framework version sl50"
         $project.Project.PropertyGroup.TargetFramework = "sl50"
         $propertyGroup = $project.CreateElement("PropertyGroup");
         $propertyGroup.SetAttribute("Condition", '''$(TargetFramework)'' == ''sl50''')
@@ -72,10 +79,10 @@ function SetTargetFramework($project, $originalProject) {
         $propertyGroup.AppendChild($targetFrameworkIdentifierElement) | Out-Null
         $propertyGroup.AppendChild($targetFrameworkVersionElement) | Out-Null
         $project.Project.AppendChild($propertyGroup) | Out-Null
+    }else{
+        Write-Warning "Unknown target framework version $targetFrameworkVersion"
         return
     }
-
-    Write-Warning "Unknown target framework version $targetFrameworkVersion"
 }
 
 # Make sure the target folder exists
@@ -95,6 +102,10 @@ if ($projectsToMigrate.Length -eq 0) {
 
 # Go through each of the projects
 Write-Verbose "Found $($projectsToMigrate.Length) projects to migrate"
+
+# Set location to solution folder.
+Push-Location $TargetFolder
+
 foreach ($projectToMigrate in $projectsToMigrate) {
     # Load the original project
     $originalProject = [xml](Get-Content $projectToMigrate.FullName -Encoding UTF8)
@@ -105,32 +116,32 @@ foreach ($projectToMigrate in $projectsToMigrate) {
 
     # Go to the folder containing the project
     $projectFolder = [System.IO.Path]::GetDirectoryName($projectToMigrate.FullName)
-    Push-Location $projectFolder
-
+    
     # Create a new project
-    Write-Verbose "Creating new project at $projectFolder"
-    & dotnet new --type lib
+    $projectName = [System.IO.Path]::GetFileNameWithoutExtension($projectToMigrate.FullName)
+    Write-Verbose "Creating new project '$projectName' at $projectFolder"
+    & dotnet new classlib -o $projectName
     Remove-Item (Join-Path $projectFolder "Class1.cs")
     $projectPath = (Join-Path $projectFolder (Split-Path $projectFolder -Leaf)) + ".csproj"
     Write-Verbose "Created new project at $projectPath"
 
     # Load the project file for further manipulation
     $project = [xml](Get-Content $projectPath -Encoding UTF8)
-    SetTargetframework $project $originalProject
+    SetTargetframework $project $originalProject $projectPath
 
     # Copy over package references from packages.config
     $packagesConfigPath = Join-Path $projectFolder "packages.config"
     Write-Verbose "Copying package references from $packagesConfigPath"
     if (Test-Path $packagesConfigPath) {
-        CopyPackageReferences $project $packagesConfigPath
+        CopyPackageReferences $project $packagesConfigPath $projectPath
         Remove-Item $packagesConfigPath
     }
 
     # Copy over project references
     Write-Verbose "Copying project references from $($projectToMigrate.FullName)"
-    CopyProjectReferences $project $originalProject
+    CopyProjectReferences $project $originalProject $projectPath
 
-    # Copy over assembly references
+    # # Copy over assembly references
     Write-Verbose "Copying assembly references from $($projectToMigrate.FullName)"
     CopyAssemblyReferences $project $originalProject
 
@@ -143,5 +154,6 @@ foreach ($projectToMigrate in $projectsToMigrate) {
 
     # Save the project file
     $project.Save($projectPath)
-    Pop-Location
 }
+
+Pop-Location
